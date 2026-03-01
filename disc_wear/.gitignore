@@ -9,4 +9,9 @@ results
 runs
 src
 tests
-data
+
+# 大型数据文件（超过100MB）
+data/processed/tbm_data_with_friction_energy.csv
+data/processed/wear_per_timestep.csv
+data/processed/wear_per_timestep_corrected.csv
+*.csv.gz
