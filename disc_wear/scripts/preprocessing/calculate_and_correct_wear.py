@@ -477,6 +477,9 @@ def calculate_and_correct_wear():
     import time
     start_time = time.time()
     
+    # 收集所有半径列，避免DataFrame碎片化
+    radius_columns = {}
+    
     for idx, cid in enumerate(cutter_ids, 1):
         print(f"Processing cutter {cid} ({idx}/{len(cutter_ids)})...", end=' ')
         cutter_start = time.time()
@@ -485,19 +488,23 @@ def calculate_and_correct_wear():
         corrected_radius_col = f'cutter_{cid}_wear_radius_corrected'
         
         if cid <= 30:
-            friction_df[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
+            radius_columns[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
         elif cid <= 42:
-            friction_df[corrected_radius_col] = volume_to_radius_new(
+            radius_columns[corrected_radius_col] = volume_to_radius_new(
                 friction_df[corrected_volume_col].values, 
                 cutter_id=cid
             )
         elif cid == 43:
-            friction_df[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
+            radius_columns[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
         else:
-            friction_df[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
+            radius_columns[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
         
         cutter_elapsed = time.time() - cutter_start
         print(f"Done in {cutter_elapsed:.1f}s")
+    
+    # 一次性添加所有半径列
+    radius_df = pd.DataFrame(radius_columns, index=friction_df.index)
+    friction_df = pd.concat([friction_df, radius_df], axis=1)
     
     total_elapsed = time.time() - start_time
     print(f"Converted all volumes to radius in {total_elapsed/60:.1f} minutes.")
