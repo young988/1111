@@ -1,0 +1,12 @@
+__pycache__/
+.kiro/
+.vscode/
+checkpoints/
+configs
+examples
+models
+results
+runs
+src
+tests
+data
