@@ -134,7 +134,7 @@ def volume_to_radius(volume, T=25.4, R=241.3, theta_deg=20, N=1):
     
     return np.maximum(0, delta_r)
 
-def volume_to_radius_new(volume, cutter_id, T=25.4, H=2413, theta_deg=20, initial_guess=None):
+def volume_to_radius_new(volume, cutter_id, T=25.4, H=241.3, theta_deg=20, initial_guess=None):
     """将磨损体积转换回磨损半径（新公式，用于31-42号刀具）"""
     if not SCIPY_AVAILABLE:
         print("Warning: scipy not available, using approximation")
@@ -458,15 +458,19 @@ def calculate_and_correct_wear():
     # ===== Step 7: 将修正后的体积写回原始数据 =====
     print("--- Step 7: Updating data with corrected volume ---")
     
+    # 创建环号到修正体积的映射字典，避免DataFrame碎片化
+    corrected_volume_columns = {}
+    
     for cid in cutter_ids:
         corrected_col_name = f'cutter_{cid}_wear_volume_corrected'
         
-        def get_corrected_value(ring):
-            if ring in corrected_wear_per_ring.index:
-                return corrected_wear_per_ring.loc[ring, cid]
-            return np.nan
-        
-        friction_df[corrected_col_name] = friction_df['ring_number'].apply(get_corrected_value)
+        # 使用向量化操作而非apply
+        ring_to_value = corrected_wear_per_ring[cid].to_dict()
+        corrected_volume_columns[corrected_col_name] = friction_df['ring_number'].map(ring_to_value)
+    
+    # 一次性添加所有修正后的体积列
+    corrected_volume_df = pd.DataFrame(corrected_volume_columns, index=friction_df.index)
+    friction_df = pd.concat([friction_df, corrected_volume_df], axis=1)
     
     print("Corrected volume columns added.")
 

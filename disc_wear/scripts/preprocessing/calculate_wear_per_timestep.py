@@ -227,7 +227,7 @@ def volume_to_radius(volume, T=25.4, R=241.3, theta_deg=20, N=1):
     return np.maximum(0, delta_r)
 
 
-def volume_to_radius_new(volume, cutter_id, T=25.4, H=2413, theta_deg=20, initial_guess=None):
+def volume_to_radius_new(volume, cutter_id, T=25.4, H=241.3, theta_deg=20, initial_guess=None):
     """
     Convert wear volume back to wear radius for the new formula (cutters 31-42).
     
@@ -238,7 +238,7 @@ def volume_to_radius_new(volume, cutter_id, T=25.4, H=2413, theta_deg=20, initia
     - volume: 磨损体积 (mm³)
     - cutter_id: 刀具编号 (31-42)
     - T: 刀具厚度 (mm), 默认 25.4
-    - H: 刀具高度 (mm), 默认 2413
+    - H: 刀具高度 (mm), 默认 241.3
     - theta_deg: 角度 θ (度), 默认 20
     - initial_guess: delta_r 的初始猜测值 (可选)
     
@@ -441,7 +441,7 @@ def calculate_wear_per_timestep():
     k_values_df.to_csv(k_values_output_path)
     print(f"Saved volume-based k-values to {k_values_output_path}")
 
-    # --- 5. Generate wear for every timestep ---
+    # --- 4. Generate wear for every timestep ---
     print("--- Step 4: Generating wear for every timestep ---")
     
     for cutter_id, k in cutter_k_values.items():
@@ -451,7 +451,7 @@ def calculate_wear_per_timestep():
 
     print("Generated per-timestep wear columns (in volume mm³) for all cutters.")
     
-    # --- 5.5. Convert volume back to radius for each cutter (OPTIONAL) ---
+    # --- 4.5. Convert volume back to radius for each cutter (OPTIONAL) ---
     if args.convert_to_radius:
         print("--- Step 4.5: Converting wear volume back to radius for each cutter ---")
         print("WARNING: This step is very time-consuming and may take 8+ hours for large datasets!")
@@ -603,6 +603,56 @@ def calculate_wear_per_timestep():
         plt.tight_layout(rect=[0, 0, 0.85, 1])
         plt.savefig(plot_dir / "all_cutters_wear_growth_radius.png", dpi=300)
         plt.close()
+        
+        # --- 累计磨损半径图：为每把刀具单独生成 ---
+        print("Generating cumulative radius plots for individual cutters...")
+        individual_cumulative_radius_dir = plot_dir / "individual_cumulative_radius"
+        individual_cumulative_radius_dir.mkdir(parents=True, exist_ok=True)
+        print(f"Saving individual cumulative radius plots to {individual_cumulative_radius_dir}")
+        
+        for cutter_id in wear_df.index:
+            plt.figure(figsize=(10, 6))
+            # 绘制累计磨损半径曲线
+            plt.plot(wear_growth_radius_df.index.values, 
+                    wear_growth_radius_df[f'cutter_{cutter_id}_wear_radius'].values, 
+                    color='darkblue', linewidth=2.5, label=f'Cumulative Wear Radius')
+            # 叠加实测数据点
+            wear_radius_values = wear_df.loc[cutter_id, :]
+            valid_mask = ~wear_radius_values.isna()
+            valid_rings = wear_radius_values.index[valid_mask].astype(int)
+            valid_radius = wear_radius_values[valid_mask].values
+            plt.scatter(valid_rings, valid_radius, color='red', s=100, alpha=0.8, 
+                       label='Measured Data', zorder=5, edgecolors='black', linewidths=1.5)
+            
+            plt.title(f'Cutter #{cutter_id}: Cumulative Wear Radius', fontsize=14, fontweight='bold')
+            plt.xlabel('Ring Number', fontsize=12)
+            plt.ylabel('Cumulative Wear Radius (mm)', fontsize=12)
+            plt.legend(fontsize=11)
+            plt.grid(True, alpha=0.3, linestyle='--')
+            plt.tight_layout()
+            plt.savefig(individual_cumulative_radius_dir / f"cutter_{cutter_id:02d}_cumulative_radius.png", dpi=150)
+            plt.close()
+        
+        # --- 合并累计图：所有刀具的累计磨损半径 ---
+        print("Generating combined cumulative radius plot for all cutters...")
+        plt.figure(figsize=(18, 12))
+        colors = plt.cm.jet(np.linspace(0, 1, len(wear_df.index)))
+        
+        for i, cutter_id in enumerate(wear_df.index):
+            plt.plot(wear_growth_radius_df.index.values, 
+                    wear_growth_radius_df[f'cutter_{cutter_id}_wear_radius'].values, 
+                    color=colors[i], linewidth=2, label=f'Cutter {cutter_id}', alpha=0.8)
+        
+        plt.title('All Cutters: Cumulative Wear Radius', fontsize=20, fontweight='bold')
+        plt.xlabel('Ring Number', fontsize=16)
+        plt.ylabel('Cumulative Wear Radius (mm)', fontsize=16)
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left', ncol=2, fontsize=10)
+        plt.grid(True, alpha=0.3, linestyle='--')
+        plt.tight_layout(rect=[0, 0, 0.88, 1])
+        plt.savefig(plot_dir / "all_cutters_cumulative_radius.png", dpi=300)
+        plt.close()
+        
+        print("Cumulative radius plots generated successfully.")
 
     # --- Plot 3: Recorded vs Generated Wear Comparison (Volume) ---
     total_wear_instance = Total_wear()
