@@ -144,12 +144,16 @@ def piecewise_linear_transform(all_x, model_y, true_x, true_y):
     corrected_y = np.zeros_like(model_y, dtype=float)
     ratio_values = np.zeros_like(model_y, dtype=float)
     
+    # 记录真实测量点的位置，用于后续保护
+    true_point_mask = np.zeros(len(all_x), dtype=bool)
+    
     # 首先，对所有真实测量点直接赋值为原始真实值，确保零误差
     for i, (tx, ty_orig) in enumerate(zip(true_x, true_y_original)):
         exact_match = np.where(all_x == tx)[0]
         if len(exact_match) > 0:
             corrected_y[exact_match] = ty_orig  # 使用原始值，不是单调化后的值
             ratio_values[exact_match] = i / (len(true_x) - 1) if len(true_x) > 1 else 0
+            true_point_mask[exact_match] = True  # 标记为真实点
     
     for i in range(len(true_x) - 1):
         tx_i = true_x[i]
@@ -226,8 +230,31 @@ def piecewise_linear_transform(all_x, model_y, true_x, true_y):
     handle_boundary(all_x < true_x[0], [0, 1], [true_y[0], true_y[1]], 0)
     handle_boundary(all_x > true_x[-1], [-2, -1], [true_y[-2], true_y[-1]], 1.0)
     
-    corrected_y = np.maximum(0, corrected_y)
-    corrected_y = ensure_monotonic(corrected_y)
+    # 对非真实点进行单调化和非负处理
+    non_true_points = ~true_point_mask
+    corrected_y[non_true_points] = np.maximum(0, corrected_y[non_true_points])
+    
+    # 分段单调化：确保每段内单调，但不改变真实点的值
+    for i in range(len(true_x)):
+        if i == 0:
+            # 第一个真实点之前的区间
+            mask = all_x < true_x[i]
+        elif i == len(true_x) - 1:
+            # 最后一个真实点之后的区间
+            mask = all_x > true_x[i]
+        else:
+            # 两个真实点之间的区间
+            mask = (all_x > true_x[i-1]) & (all_x < true_x[i])
+        
+        if np.any(mask):
+            segment_values = corrected_y[mask]
+            corrected_y[mask] = ensure_monotonic(segment_values)
+    
+    # 最后再次确保真实点的值不被改变
+    for i, (tx, ty_orig) in enumerate(zip(true_x, true_y_original)):
+        exact_match = np.where(all_x == tx)[0]
+        if len(exact_match) > 0:
+            corrected_y[exact_match] = ty_orig
     
     return corrected_y, ratio_values
 
