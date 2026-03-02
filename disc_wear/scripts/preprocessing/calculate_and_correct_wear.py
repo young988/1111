@@ -143,6 +143,13 @@ def piecewise_linear_transform(all_x, model_y, true_x, true_y):
     corrected_y = np.zeros_like(model_y, dtype=float)
     ratio_values = np.zeros_like(model_y, dtype=float)
     
+    # 首先，对所有真实测量点直接赋值，确保零误差
+    for i, (tx, ty) in enumerate(zip(true_x, true_y)):
+        exact_match = np.where(all_x == tx)[0]
+        if len(exact_match) > 0:
+            corrected_y[exact_match] = ty
+            ratio_values[exact_match] = i / (len(true_x) - 1) if len(true_x) > 1 else 0
+    
     for i in range(len(true_x) - 1):
         tx_i = true_x[i]
         tx_i_plus_1 = true_x[i + 1]
@@ -168,7 +175,8 @@ def piecewise_linear_transform(all_x, model_y, true_x, true_y):
         idx_i_plus_1 = idx_i_plus_1[-1]
         yend = model_y[idx_i_plus_1]
         
-        mask = (all_x >= tx_i) & (all_x <= tx_i_plus_1)
+        # 只处理区间内的非真实点
+        mask = (all_x > tx_i) & (all_x < tx_i_plus_1)
         segment_indices = np.where(mask)[0]
         
         if len(segment_indices) == 0:
