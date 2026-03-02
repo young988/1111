@@ -156,13 +156,15 @@ class PositionalEncoding(nn.Module):
 class CutterWearPredictor:
     """刀具磨损预测器"""
     
-    def __init__(self, model_type='LSTM', config=None):
+    def __init__(self, model_type='LSTM', config=None, models_dir=None, results_dir=None):
         self.model_type = model_type
         self.config = config or self._get_default_config()
         self.model = None
         self.scaler_X = StandardScaler()
         self.scaler_y = StandardScaler()
         self.history = {'train_loss': [], 'val_loss': []}
+        self.models_dir = Path(models_dir) if models_dir else Path('models')
+        self.results_dir = Path(results_dir) if results_dir else Path('results')
         
     def _get_default_config(self):
         """获取默认配置"""
@@ -363,7 +365,55 @@ class CutterWearPredictor:
         
         return results
     
-    def plot_training_history(self, save_dir=None, dataset_name=None):
+    def train_and_evaluate(self, dataset, dataset_name, input_size, output_size, train_ratio=0.8):
+        """完整的训练和评估流程"""
+        print(f"\n训练 {self.model_type} 模型 (数据集: {dataset_name})...")
+        
+        # 准备数据
+        train_loader, val_loader = self.prepare_data(dataset, train_ratio)
+        
+        # 训练模型
+        best_val_loss = self.train_model(train_loader, val_loader, input_size, output_size)
+        
+        # 评估模型
+        eval_results = self.evaluate_model(val_loader)
+        
+        # 保存模型
+        model_save_path = self.models_dir / f"{self.model_type}_{dataset_name}_checkpoint.pth"
+        torch.save(self.model.state_dict(), model_save_path)
+        
+        # 保存配置
+        config_save_path = self.models_dir / f"{self.model_type}_{dataset_name}_info.json"
+        with open(config_save_path, 'w') as f:
+            json.dump({
+                'model_type': self.model_type,
+                'dataset_name': dataset_name,
+                'config': self.config,
+                'best_val_loss': best_val_loss,
+                'mse': eval_results['mse'],
+                'mae': eval_results['mae'],
+                'rmse': eval_results['rmse'],
+                'r2': eval_results['r2'],
+                'input_size': input_size,
+                'output_size': output_size
+            }, f, indent=4)
+        
+        # 绘制训练历史
+        self.plot_training_history(dataset_name=dataset_name)
+        
+        # 打印结果
+        print(f"  MSE: {eval_results['mse']:.6f}")
+        print(f"  MAE: {eval_results['mae']:.6f}")
+        print(f"  RMSE: {eval_results['rmse']:.6f}")
+        print(f"  R²: {eval_results['r2']:.6f}")
+        
+        return {
+            'best_val_loss': best_val_loss,
+            'eval_results': eval_results,
+            'config': self.config
+        }
+    
+    def plot_training_history(self, dataset_name=None):
         """绘制训练历史"""
         plt.figure(figsize=(12, 4))
         
@@ -371,7 +421,6 @@ class CutterWearPredictor:
         plt.plot(self.history['train_loss'], label='Train Loss')
         plt.plot(self.history['val_loss'], label='Validation Loss')
         
-        # 标题包含数据集名称
         title = f'{self.model_type} Training History'
         if dataset_name:
             title += f' - {dataset_name}'
@@ -383,21 +432,11 @@ class CutterWearPredictor:
         
         plt.tight_layout()
         
-        # 保存图片，文件名包含数据集名称
-        if save_dir:
-            if dataset_name:
-                filename = f'{self.model_type}_{dataset_name}_training_history.png'
-            else:
-                filename = f'{self.model_type}_training_history.png'
-            save_path = Path(save_dir) / filename
-        else:
-            if dataset_name:
-                save_path = f'{self.model_type}_{dataset_name}_training_history.png'
-            else:
-                save_path = f'{self.model_type}_training_history.png'
+        filename = f'{self.model_type}_{dataset_name}_training_history.png' if dataset_name else f'{self.model_type}_training_history.png'
+        save_path = self.results_dir / filename
         
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.close()  # 关闭图形，不显示，避免阻塞
+        plt.close()
         print(f"训练历史图已保存到: {save_path}")
 
 def create_datasets():

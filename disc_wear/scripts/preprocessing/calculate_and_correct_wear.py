@@ -33,7 +33,6 @@ def radius_to_volume_new(delta_r, cutter_id, T=25.4, H=241.3, theta_deg=20):
     """将磨损半径转换为磨损体积（新公式，用于31-42号刀具）"""
     theta_rad = np.radians(theta_deg)
     tan_theta = np.tan(theta_rad)
-    sin_theta = np.sin(theta_rad)
     cos_theta = np.cos(theta_rad)
     
     d_deg = (cutter_id - 30) * 70 / 13
@@ -41,30 +40,21 @@ def radius_to_volume_new(delta_r, cutter_id, T=25.4, H=241.3, theta_deg=20):
     tan_d = np.tan(d_rad)
     sin_d = np.sin(d_rad)
     
-    angle_90_minus_theta = np.radians(90) - theta_rad
-    tan_90_minus_theta = np.tan(angle_90_minus_theta)
-    
-    numerator_h0 = (T / 2 + delta_r / tan_d) * tan_90_minus_theta
-    denominator_h0 = tan_90_minus_theta - tan_d
+    tan_90_minus_theta = np.tan(np.radians(90) - theta_rad)
     
     epsilon = 1e-6
-    if isinstance(denominator_h0, np.ndarray):
+    denominator_h0 = tan_90_minus_theta - tan_d
+    numerator_h0 = (T / 2 + delta_r / tan_d) * tan_90_minus_theta
+    
+    is_array = isinstance(denominator_h0, np.ndarray)
+    if is_array:
         is_singular = np.abs(denominator_h0) < epsilon
         h0 = np.where(is_singular, 2 * delta_r, numerator_h0 / np.where(is_singular, epsilon, denominator_h0))
     else:
-        if abs(denominator_h0) < epsilon:
-            h0 = 2 * delta_r
-        else:
-            h0 = numerator_h0 / denominator_h0
+        h0 = 2 * delta_r if abs(denominator_h0) < epsilon else numerator_h0 / denominator_h0
     
-    angle_90_plus_theta_minus_d = np.radians(90) + theta_rad - d_rad
-    sin_angle_h1 = np.sin(angle_90_plus_theta_minus_d)
-    
-    if isinstance(sin_angle_h1, np.ndarray):
-        sin_angle_h1 = np.where(np.abs(sin_angle_h1) < epsilon, epsilon, sin_angle_h1)
-    else:
-        if abs(sin_angle_h1) < epsilon:
-            sin_angle_h1 = epsilon
+    sin_angle_h1 = np.sin(np.radians(90) + theta_rad - d_rad)
+    sin_angle_h1 = np.where(np.abs(sin_angle_h1) < epsilon, epsilon, sin_angle_h1) if is_array else (epsilon if abs(sin_angle_h1) < epsilon else sin_angle_h1)
     
     bracket_h1 = 1 - (sin_d * cos_theta) / sin_angle_h1
     h1 = (delta_r / tan_d - T / 2) * bracket_h1 * tan_d
@@ -74,14 +64,10 @@ def radius_to_volume_new(delta_r, cutter_id, T=25.4, H=241.3, theta_deg=20):
     if isinstance(delta_r, (np.ndarray, pd.Series)) or hasattr(condition_value, '__len__'):
         use_formula1 = condition_value > T
         V = np.zeros_like(delta_r, dtype=float)
-        
-        if np.any(use_formula1):
-            V0 = np.pi * (delta_r / tan_d + T / 2) * h0 * (H - h0 / 3)
-            V1 = np.pi * (delta_r / tan_d - T / 2) * h1 * (H - h1 / 3)
-            V[use_formula1] = (V0 - V1)[use_formula1]
-        
-        if np.any(~use_formula1):
-            V[~use_formula1] = (np.pi * condition_value * h0 * (H - h0 / 3))[~use_formula1]
+        V0 = np.pi * (delta_r / tan_d + T / 2) * h0 * (H - h0 / 3)
+        V1 = np.pi * (delta_r / tan_d - T / 2) * h1 * (H - h1 / 3)
+        V[use_formula1] = (V0 - V1)[use_formula1]
+        V[~use_formula1] = (np.pi * condition_value * h0 * (H - h0 / 3))[~use_formula1]
     else:
         condition_scalar = condition_value.item() if hasattr(condition_value, 'item') else condition_value
         if condition_scalar > T:
@@ -95,42 +81,23 @@ def radius_to_volume_new(delta_r, cutter_id, T=25.4, H=241.3, theta_deg=20):
 
 def volume_to_radius(volume, T=25.4, R=241.3, theta_deg=20, N=1):
     """将磨损体积转换回磨损半径（原始公式）"""
-    theta_rad = np.radians(theta_deg)
-    tan_theta = np.tan(theta_rad)
+    tan_theta = np.tan(np.radians(theta_deg))
     
-    if isinstance(volume, np.ndarray):
-        delta_r = np.zeros_like(volume, dtype=float)
-        for i in range(len(volume)):
-            v = volume[i]
-            a = -(2/3) * tan_theta
-            b = R * tan_theta - T/2
-            c = T * R
-            d = -v / (2 * np.pi * N)
-            
-            coefficients = [a, b, c, d]
-            roots = np.roots(coefficients)
-            
-            real_roots = roots[np.abs(np.imag(roots)) < 1e-10]
-            positive_roots = real_roots[np.real(real_roots) > 0]
-            if len(positive_roots) > 0:
-                delta_r[i] = np.real(np.min(positive_roots))
-            else:
-                delta_r[i] = 0
-    else:
-        a = -(2/3) * tan_theta
-        b = R * tan_theta - T/2
-        c = T * R
-        d = -volume / (2 * np.pi * N)
-        
-        coefficients = [a, b, c, d]
-        roots = np.roots(coefficients)
-        
+    a = -(2/3) * tan_theta
+    b = R * tan_theta - T/2
+    c = T * R
+    
+    def solve_single(v):
+        d = -v / (2 * np.pi * N)
+        roots = np.roots([a, b, c, d])
         real_roots = roots[np.abs(np.imag(roots)) < 1e-10]
         positive_roots = real_roots[np.real(real_roots) > 0]
-        if len(positive_roots) > 0:
-            delta_r = np.real(np.min(positive_roots))
-        else:
-            delta_r = 0
+        return np.real(np.min(positive_roots)) if len(positive_roots) > 0 else 0
+    
+    if isinstance(volume, np.ndarray):
+        delta_r = np.array([solve_single(v) for v in volume])
+    else:
+        delta_r = solve_single(volume)
     
     return np.maximum(0, delta_r)
 
@@ -143,57 +110,30 @@ def volume_to_radius_new(volume, cutter_id, T=25.4, H=241.3, theta_deg=20, initi
     def equation(delta_r, target_volume):
         if delta_r < 0:
             return 1e10
-        calculated_volume = radius_to_volume_new(delta_r, cutter_id=cutter_id, T=T, H=H, theta_deg=theta_deg)
-        return calculated_volume - target_volume
+        return radius_to_volume_new(delta_r, cutter_id=cutter_id, T=T, H=H, theta_deg=theta_deg) - target_volume
+    
+    def solve_single(v):
+        if v <= 0:
+            return 0
+        guess = initial_guess if initial_guess is not None else (v / (2 * np.pi * T * H)) ** 0.5
+        try:
+            solution = fsolve(equation, guess, args=(v,), full_output=True)
+            if solution[2] == 1:
+                return max(0, solution[0][0])
+            return brentq(equation, 0, 100, args=(v,))
+        except:
+            return 0
     
     if isinstance(volume, np.ndarray):
-        delta_r = np.zeros_like(volume, dtype=float)
-        for i in range(len(volume)):
-            v = volume[i]
-            if v <= 0:
-                delta_r[i] = 0
-                continue
-            
-            guess = initial_guess if initial_guess is not None else (v / (2 * np.pi * T * H)) ** 0.5
-            
-            try:
-                solution = fsolve(equation, guess, args=(v,), full_output=True)
-                if solution[2] == 1:
-                    delta_r[i] = max(0, solution[0][0])
-                else:
-                    try:
-                        delta_r[i] = brentq(equation, 0, 100, args=(v,))
-                    except:
-                        delta_r[i] = 0
-            except:
-                delta_r[i] = 0
+        delta_r = np.array([solve_single(v) for v in volume])
     else:
-        if volume <= 0:
-            return 0
-        
-        guess = initial_guess if initial_guess is not None else (volume / (2 * np.pi * T * H)) ** 0.5
-        
-        try:
-            solution = fsolve(equation, guess, args=(volume,), full_output=True)
-            if solution[2] == 1:
-                delta_r = max(0, solution[0][0])
-            else:
-                try:
-                    delta_r = brentq(equation, 0, 100, args=(volume,))
-                except:
-                    delta_r = 0
-        except:
-            delta_r = 0
+        delta_r = solve_single(volume)
     
     return np.maximum(0, delta_r)
 
 def ensure_monotonic(values):
     """确保数组单调递增（累积最大值）"""
-    result = np.copy(values)
-    for i in range(1, len(result)):
-        if result[i] < result[i-1]:
-            result[i] = result[i-1]
-    return result
+    return np.maximum.accumulate(values)
 
 def piecewise_linear_transform(all_x, model_y, true_x, true_y):
     """分段归一化重映射（橡皮筋理论）"""
@@ -251,55 +191,31 @@ def piecewise_linear_transform(all_x, model_y, true_x, true_y):
             corrected_y[idx] = ty_i + R * (ty_i_plus_1 - ty_i)
     
     # 处理边界外的点
-    first_mask = all_x < true_x[0]
-    if np.any(first_mask):
-        idx_0 = np.where(all_x == true_x[0])[0]
-        idx_1 = np.where(all_x == true_x[1])[0]
+    def handle_boundary(mask, idx_pair, y_pair, default_ratio):
+        if not np.any(mask):
+            return
+        idx_0 = np.where(all_x == true_x[idx_pair[0]])[0]
+        idx_1 = np.where(all_x == true_x[idx_pair[1]])[0]
         
         if len(idx_0) > 0 and len(idx_1) > 0:
-            idx_0 = idx_0[-1]
-            idx_1 = idx_1[-1]
-            ystart = model_y[idx_0]
-            yend = model_y[idx_1]
-            delta_model = yend - ystart
-            delta_true = true_y[1] - true_y[0]
+            idx_0, idx_1 = idx_0[-1], idx_1[-1]
+            delta_model = model_y[idx_1] - model_y[idx_0]
+            delta_true = true_y[idx_pair[1]] - true_y[idx_pair[0]]
             
             if abs(delta_model) > 1e-10:
-                for idx in np.where(first_mask)[0]:
-                    R = (model_y[idx] - ystart) / delta_model
+                for idx in np.where(mask)[0]:
+                    R = (model_y[idx] - model_y[idx_0 if idx_pair[0] == 0 else idx_1]) / delta_model
                     ratio_values[idx] = R
-                    corrected_y[idx] = true_y[0] + R * delta_true
+                    corrected_y[idx] = true_y[idx_pair[0]] + R * delta_true
             else:
-                corrected_y[first_mask] = true_y[0]
-                ratio_values[first_mask] = 0
+                corrected_y[mask] = true_y[idx_pair[0]]
+                ratio_values[mask] = default_ratio
         else:
-            corrected_y[first_mask] = true_y[0]
-            ratio_values[first_mask] = 0
+            corrected_y[mask] = true_y[idx_pair[0]]
+            ratio_values[mask] = default_ratio
     
-    last_mask = all_x > true_x[-1]
-    if np.any(last_mask):
-        idx_n_minus_1 = np.where(all_x == true_x[-2])[0]
-        idx_n = np.where(all_x == true_x[-1])[0]
-        
-        if len(idx_n_minus_1) > 0 and len(idx_n) > 0:
-            idx_n_minus_1 = idx_n_minus_1[-1]
-            idx_n = idx_n[-1]
-            ystart = model_y[idx_n_minus_1]
-            yend = model_y[idx_n]
-            delta_model = yend - ystart
-            delta_true = true_y[-1] - true_y[-2]
-            
-            if abs(delta_model) > 1e-10:
-                for idx in np.where(last_mask)[0]:
-                    R = (model_y[idx] - yend) / delta_model
-                    ratio_values[idx] = R
-                    corrected_y[idx] = true_y[-1] + R * delta_true
-            else:
-                corrected_y[last_mask] = true_y[-1]
-                ratio_values[last_mask] = 1.0
-        else:
-            corrected_y[last_mask] = true_y[-1]
-            ratio_values[last_mask] = 1.0
+    handle_boundary(all_x < true_x[0], [0, 1], [true_y[0], true_y[1]], 0)
+    handle_boundary(all_x > true_x[-1], [-2, -1], [true_y[-2], true_y[-1]], 1.0)
     
     corrected_y = np.maximum(0, corrected_y)
     corrected_y = ensure_monotonic(corrected_y)
@@ -368,12 +284,10 @@ def calculate_and_correct_wear():
     true_wear_volume_df = pd.DataFrame(index=wear_df.index, columns=wear_df.columns)
     
     for cid in cutter_ids:
-        if cid <= 30:
+        if cid <= 30 or cid == 43:
             true_wear_volume_df.loc[cid] = radius_to_volume(wear_df.loc[cid])
         elif cid <= 42:
             true_wear_volume_df.loc[cid] = radius_to_volume_new(wear_df.loc[cid], cutter_id=cid)
-        elif cid == 43:
-            true_wear_volume_df.loc[cid] = radius_to_volume(wear_df.loc[cid])
         else:
             true_wear_volume_df.loc[cid] = radius_to_volume(wear_df.loc[43])
     
@@ -392,22 +306,17 @@ def calculate_and_correct_wear():
         wear_radius_points = wear_radius_values.values[valid_indices]
         friction_points = friction_values[valid_indices]
 
-        if cutter_id <= 30:
+        if cutter_id <= 30 or cutter_id == 43:
             wear_volume_points = radius_to_volume(wear_radius_points)
         elif cutter_id <= 42:
             wear_volume_points = radius_to_volume_new(wear_radius_points, cutter_id=cutter_id)
-        elif cutter_id == 43:
-            wear_volume_points = radius_to_volume(wear_radius_points)
         else:
             wear_radius_43 = wear_df.loc[43, aligned_friction.index]
-            wear_radius_points_43 = wear_radius_43.values[valid_indices]
-            wear_volume_points = radius_to_volume(wear_radius_points_43)
+            wear_volume_points = radius_to_volume(wear_radius_43.values[valid_indices])
 
-        if len(wear_volume_points) > 0 and np.sum(friction_points**2) > 0:
-            k = np.sum(friction_points * wear_volume_points) / np.sum(friction_points**2)
-            cutter_k_values[cutter_id] = k
-        else:
-            cutter_k_values[cutter_id] = 0
+        friction_sum_sq = np.sum(friction_points**2)
+        k = np.sum(friction_points * wear_volume_points) / friction_sum_sq if len(wear_volume_points) > 0 and friction_sum_sq > 0 else 0
+        cutter_k_values[cutter_id] = k
 
     print(f"Calculated 'k' for {len(cutter_k_values)} cutters.")
 
@@ -421,127 +330,227 @@ def calculate_and_correct_wear():
 
     print("Generated per-timestep wear volume columns.")
 
-    # ===== Step 6: 修正磨损体积（分段归一化重映射） =====
-    print("--- Step 6: Correcting wear volume using piecewise linear transform ---")
+    # ===== Step 6: 将磨损体积转换为半径（按环号） =====
+    print("--- Step 6: Converting wear volume to radius (per ring) ---")
+    
+    import time
+    start_time = time.time()
     
     wear_cols_volume = [f'cutter_{cid}_wear_volume' for cid in cutter_ids]
     interp_wear_per_ring = friction_df.groupby('ring_number')[wear_cols_volume].max()
     all_rings = np.array(sorted(interp_wear_per_ring.index.tolist()))
     
-    corrected_wear_per_ring = pd.DataFrame(index=all_rings, columns=cutter_ids)
+    # 按环号将体积转换为半径（数据量远小于逐行转换，大幅提速）
+    radius_per_ring = pd.DataFrame(index=all_rings, columns=cutter_ids, dtype=float)
+    
+    for idx, cid in enumerate(cutter_ids, 1):
+        print(f"Converting cutter {cid} ({idx}/{len(cutter_ids)})...", end=' ')
+        cutter_start = time.time()
+        
+        col_name = f'cutter_{cid}_wear_volume'
+        volume_values = interp_wear_per_ring.loc[all_rings, col_name].values.astype(float)
+        
+        if cid <= 30 or cid >= 43:
+            radius_per_ring[cid] = volume_to_radius(volume_values)
+        else:  # 31-42
+            radius_per_ring[cid] = volume_to_radius_new(volume_values, cutter_id=cid)
+        
+        print(f"Done in {time.time() - cutter_start:.1f}s")
+    
+    elapsed = time.time() - start_time
+    print(f"Volume to radius conversion completed in {elapsed/60:.1f} minutes.")
+
+    # ===== Step 7: 修正磨损半径（分段归一化重映射） =====
+    print("--- Step 7: Correcting wear RADIUS using piecewise linear transform ---")
+    print("(Correction applied after radius conversion to ensure passing through true radius points)")
+    
+    corrected_radius_per_ring = pd.DataFrame(index=all_rings, columns=cutter_ids, dtype=float)
     
     for cid in cutter_ids:
-        col_name = f'cutter_{cid}_wear_volume'
-        model_values = interp_wear_per_ring.loc[all_rings, col_name].values
+        model_radius_values = radius_per_ring.loc[all_rings, cid].values.astype(float)
         
+        # 真实值使用原始测量的磨损半径（而非体积），确保修正后过真实点
         valid_measured_rings = [0]
-        true_values = [0.0]
+        true_radius_values = [0.0]
         
         for ring in measured_rings:
             if ring in interp_wear_per_ring.index:
                 valid_measured_rings.append(ring)
-                true_values.append(true_wear_volume_df.loc[cid, ring])
+                true_radius_values.append(wear_df.loc[cid, ring])
         
         if len(valid_measured_rings) >= 2:
             corrected_values, _ = piecewise_linear_transform(
                 all_x=all_rings,
-                model_y=model_values,
+                model_y=model_radius_values,
                 true_x=np.array(valid_measured_rings),
-                true_y=np.array(true_values)
+                true_y=np.array(true_radius_values, dtype=float)
             )
-            corrected_wear_per_ring[cid] = corrected_values
+            corrected_radius_per_ring[cid] = corrected_values
         else:
-            corrected_wear_per_ring[cid] = model_values
+            corrected_radius_per_ring[cid] = model_radius_values
     
-    print(f"Correction completed for {len(cutter_ids)} cutters")
+    print(f"Radius correction completed for {len(cutter_ids)} cutters")
 
-    # ===== Step 7: 将修正后的体积写回原始数据 =====
-    print("--- Step 7: Updating data with corrected volume ---")
+    # ===== Step 8: 将修正后的半径写回原始数据 =====
+    print("--- Step 8: Updating data with corrected radius ---")
     
-    # 创建环号到修正体积的映射字典，避免DataFrame碎片化
-    corrected_volume_columns = {}
+    corrected_radius_columns = {}
+    for cid in cutter_ids:
+        corrected_radius_col = f'cutter_{cid}_wear_radius_corrected'
+        ring_to_radius = corrected_radius_per_ring[cid].to_dict()
+        corrected_radius_columns[corrected_radius_col] = friction_df['ring_number'].map(ring_to_radius)
+    
+    radius_df = pd.DataFrame(corrected_radius_columns, index=friction_df.index)
+    friction_df = pd.concat([friction_df, radius_df], axis=1)
+    print("Corrected radius columns added.")
+
+    # ===== Step 9: 绘制修正前后对比图 & 修正曲线与真实点对比图 =====
+    print("--- Step 9: Generating comparison plots ---")
+    
+    plot_dir = project_root / "results" / "wear_correction_plots"
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    
+    # --- 9a: 每把刀的修正前后对比图（子图拼合） ---
+    n_cutters = len(cutter_ids)
+    n_cols = 6
+    n_rows = (n_cutters + n_cols - 1) // n_cols
+    
+    fig1, axes1 = plt.subplots(n_rows, n_cols, figsize=(28, 4 * n_rows))
+    axes1 = axes1.flatten()
+    
+    for idx, cid in enumerate(cutter_ids):
+        ax = axes1[idx]
+        
+        # 修正前（模型转换后的半径）
+        before_values = radius_per_ring.loc[all_rings, cid].values.astype(float)
+        ax.plot(all_rings, before_values, 'b--', linewidth=1, alpha=0.6, label='修正前')
+        
+        # 修正后
+        after_values = corrected_radius_per_ring[cid].values.astype(float)
+        ax.plot(all_rings, after_values, 'g-', linewidth=1.5, label='修正后')
+        
+        # 真实测量点
+        true_rings_plot = []
+        true_vals_plot = []
+        for ring in measured_rings:
+            if ring in corrected_radius_per_ring.index:
+                true_rings_plot.append(ring)
+                true_vals_plot.append(wear_df.loc[cid, ring])
+        ax.plot(true_rings_plot, true_vals_plot, 'ro', markersize=6, label='真实值')
+        
+        ax.set_title(f'刀具 #{cid}', fontsize=11)
+        ax.set_xlabel('环号')
+        ax.set_ylabel('磨损半径 (mm)')
+        ax.legend(fontsize=7)
+        ax.grid(True, alpha=0.3)
+    
+    for idx in range(n_cutters, len(axes1)):
+        axes1[idx].set_visible(False)
+    
+    plt.suptitle('磨损半径修正前后对比（蓝=修正前，绿=修正后，红点=真实值）', fontsize=16, y=1.02)
+    plt.tight_layout()
+    fig1.savefig(plot_dir / "all_cutters_before_after_comparison.png", dpi=150, bbox_inches='tight')
+    plt.close(fig1)
+    print(f"Saved: {plot_dir / 'all_cutters_before_after_comparison.png'}")
+    
+    # --- 9b: 修正曲线与真实点的对比图（放大版，验证是否过真实点） ---
+    fig2, axes2 = plt.subplots(n_rows, n_cols, figsize=(28, 4 * n_rows))
+    axes2 = axes2.flatten()
+    
+    for idx, cid in enumerate(cutter_ids):
+        ax = axes2[idx]
+        
+        # 修正后曲线
+        after_values = corrected_radius_per_ring[cid].values.astype(float)
+        ax.plot(all_rings, after_values, 'g-', linewidth=1.5, label='修正后')
+        
+        # 真实点（含原点）
+        true_rings_with_origin = [0]
+        true_vals_with_origin = [0.0]
+        for ring in measured_rings:
+            if ring in corrected_radius_per_ring.index:
+                true_rings_with_origin.append(ring)
+                true_vals_with_origin.append(wear_df.loc[cid, ring])
+        ax.plot(true_rings_with_origin, true_vals_with_origin, 'ro', markersize=8, 
+                zorder=5, label='真实值')
+        
+        # 在真实点处标注误差
+        for ring, true_val in zip(true_rings_with_origin, true_vals_with_origin):
+            if ring in corrected_radius_per_ring.index:
+                corrected_val = float(corrected_radius_per_ring.loc[ring, cid])
+                err = abs(corrected_val - true_val)
+                if err > 0.001:
+                    ax.annotate(f'{err:.3f}', (ring, true_val), textcoords="offset points",
+                               xytext=(0, 10), fontsize=6, color='red', ha='center')
+        
+        ax.set_title(f'刀具 #{cid}', fontsize=11)
+        ax.set_xlabel('环号')
+        ax.set_ylabel('磨损半径 (mm)')
+        ax.legend(fontsize=7)
+        ax.grid(True, alpha=0.3)
+    
+    for idx in range(n_cutters, len(axes2)):
+        axes2[idx].set_visible(False)
+    
+    plt.suptitle('修正曲线与真实点对比（验证过点情况）', fontsize=16, y=1.02)
+    plt.tight_layout()
+    fig2.savefig(plot_dir / "all_cutters_corrected_vs_true.png", dpi=150, bbox_inches='tight')
+    plt.close(fig2)
+    print(f"Saved: {plot_dir / 'all_cutters_corrected_vs_true.png'}")
+    
+    # --- 9c: 输出真实点处的修正误差 ---
+    print("\n--- 真实点处修正后误差 ---")
+    print(f"{'刀具ID':>8s} | {'环号':>8s} | {'真实值(mm)':>12s} | {'修正值(mm)':>12s} | {'误差(mm)':>10s}")
+    print("-" * 65)
+    
+    max_error_all = 0
+    error_records = []
     
     for cid in cutter_ids:
-        corrected_col_name = f'cutter_{cid}_wear_volume_corrected'
-        
-        # 使用向量化操作而非apply
-        ring_to_value = corrected_wear_per_ring[cid].to_dict()
-        corrected_volume_columns[corrected_col_name] = friction_df['ring_number'].map(ring_to_value)
+        cid_max_error = 0
+        for ring in measured_rings:
+            if ring in corrected_radius_per_ring.index:
+                true_val = float(wear_df.loc[cid, ring])
+                corrected_val = float(corrected_radius_per_ring.loc[ring, cid])
+                err = abs(corrected_val - true_val)
+                cid_max_error = max(cid_max_error, err)
+                max_error_all = max(max_error_all, err)
+                error_records.append({
+                    'cutter_id': cid, 'ring': ring,
+                    'true_value': true_val, 'corrected_value': corrected_val, 'error': err
+                })
+        # 只打印每把刀的最大误差
+        print(f"{'#'+str(cid):>8s} | {'--':>8s} | {'--':>12s} | {'--':>12s} | {cid_max_error:>10.4f} (max)")
     
-    # 一次性添加所有修正后的体积列
-    corrected_volume_df = pd.DataFrame(corrected_volume_columns, index=friction_df.index)
-    friction_df = pd.concat([friction_df, corrected_volume_df], axis=1)
+    print(f"\n所有刀具所有测量点的最大误差: {max_error_all:.6f} mm")
     
-    print("Corrected volume columns added.")
+    # 保存误差明细到CSV
+    error_df = pd.DataFrame(error_records)
+    error_csv_path = plot_dir / "correction_error_at_true_points.csv"
+    error_df.to_csv(error_csv_path, index=False)
+    print(f"误差明细已保存: {error_csv_path}")
 
-    # ===== Step 8: 将修正后的体积转换为半径 =====
-    print("--- Step 8: Converting corrected volume to radius ---")
-    print("This may take some time...")
+    # ===== Step 10: 保存结果 =====
+    print("\n--- Step 10: Saving results ---")
     
-    import time
-    start_time = time.time()
-    
-    # 收集所有半径列，避免DataFrame碎片化
-    radius_columns = {}
-    
-    for idx, cid in enumerate(cutter_ids, 1):
-        print(f"Processing cutter {cid} ({idx}/{len(cutter_ids)})...", end=' ')
-        cutter_start = time.time()
-        
-        corrected_volume_col = f'cutter_{cid}_wear_volume_corrected'
-        corrected_radius_col = f'cutter_{cid}_wear_radius_corrected'
-        
-        if cid <= 30:
-            radius_columns[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
-        elif cid <= 42:
-            radius_columns[corrected_radius_col] = volume_to_radius_new(
-                friction_df[corrected_volume_col].values, 
-                cutter_id=cid
-            )
-        elif cid == 43:
-            radius_columns[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
-        else:
-            radius_columns[corrected_radius_col] = volume_to_radius(friction_df[corrected_volume_col].values)
-        
-        cutter_elapsed = time.time() - cutter_start
-        print(f"Done in {cutter_elapsed:.1f}s")
-    
-    # 一次性添加所有半径列
-    radius_df = pd.DataFrame(radius_columns, index=friction_df.index)
-    friction_df = pd.concat([friction_df, radius_df], axis=1)
-    
-    total_elapsed = time.time() - start_time
-    print(f"Converted all volumes to radius in {total_elapsed/60:.1f} minutes.")
-
-    # ===== Step 9: 保存结果 =====
-    print("--- Step 9: Saving results ---")
-    
-    # 保存主表（包含体积和半径）
+    # 保存主表（包含修正后半径）
     friction_df.to_csv(args.output_csv, index=False)
     print(f"Saved main table to: {args.output_csv}")
     
-    # 为每把刀单独输出体积和半径表
+    # 为每把刀单独输出半径表
     output_dir = project_root / "data" / "processed" / "individual_cutters"
     output_dir.mkdir(parents=True, exist_ok=True)
     
     for cid in cutter_ids:
-        volume_col = f'cutter_{cid}_wear_volume_corrected'
         radius_col = f'cutter_{cid}_wear_radius_corrected'
         
-        cutter_df = friction_df[['ring_number', volume_col, radius_col]].copy()
-        cutter_df.columns = ['ring_number', 'wear_volume_mm3', 'wear_radius_mm']
+        cutter_df = friction_df[['ring_number', radius_col]].copy()
+        cutter_df.columns = ['ring_number', 'wear_radius_mm']
         
         output_path = output_dir / f"cutter_{cid:02d}_wear.csv"
         cutter_df.to_csv(output_path, index=False)
     
     print(f"Saved individual cutter tables to: {output_dir}")
-    
-    # 汇总表：每个环号下44把刀的磨损体积
-    volume_summary = friction_df.groupby('ring_number')[[f'cutter_{cid}_wear_volume_corrected' for cid in cutter_ids]].max()
-    volume_summary.columns = [f'cutter_{cid}' for cid in cutter_ids]
-    volume_summary_path = project_root / "data" / "processed" / "all_cutters_volume_summary.csv"
-    volume_summary.to_csv(volume_summary_path)
-    print(f"Saved volume summary to: {volume_summary_path}")
     
     # 汇总表：每个环号下44把刀的磨损半径
     radius_summary = friction_df.groupby('ring_number')[[f'cutter_{cid}_wear_radius_corrected' for cid in cutter_ids]].max()
@@ -549,6 +558,37 @@ def calculate_and_correct_wear():
     radius_summary_path = project_root / "data" / "processed" / "all_cutters_radius_summary.csv"
     radius_summary.to_csv(radius_summary_path)
     print(f"Saved radius summary to: {radius_summary_path}")
+
+    # ===== Step 11: 磨损半径累计图（所有刀具在同一张图上） =====
+    print("\n--- Step 11: Generating cumulative wear radius plot ---")
+    
+    fig3, ax3 = plt.subplots(figsize=(16, 8))
+    
+    # 用颜色区分不同类型的刀具
+    cmap = plt.cm.get_cmap('tab20', n_cutters)
+    
+    for idx, cid in enumerate(cutter_ids):
+        corrected_vals = corrected_radius_per_ring[cid].values.astype(float)
+        ax3.plot(all_rings, corrected_vals, color=cmap(idx), linewidth=0.8, alpha=0.8, label=f'#{cid}')
+    
+    # 添加真实测量点（所有刀具的，用灰色叉号标记）
+    for cid in cutter_ids:
+        for ring in measured_rings:
+            if ring in corrected_radius_per_ring.index:
+                true_val = float(wear_df.loc[cid, ring])
+                ax3.plot(ring, true_val, 'kx', markersize=3, alpha=0.3)
+    
+    ax3.set_xlabel('环号', fontsize=14)
+    ax3.set_ylabel('累计磨损半径 (mm)', fontsize=14)
+    ax3.set_title('所有刀具修正后磨损半径累计图', fontsize=16)
+    ax3.grid(True, alpha=0.3)
+    
+    # 图例放在图外右侧
+    ax3.legend(bbox_to_anchor=(1.02, 1), loc='upper left', fontsize=7, ncol=2, title='刀具编号')
+    
+    fig3.savefig(plot_dir / "all_cutters_cumulative_wear_radius.png", dpi=150, bbox_inches='tight')
+    plt.close(fig3)
+    print(f"Saved: {plot_dir / 'all_cutters_cumulative_wear_radius.png'}")
 
     print("\n=== Processing completed successfully! ===")
 
