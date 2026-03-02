@@ -137,17 +137,18 @@ def ensure_monotonic(values):
 
 def piecewise_linear_transform(all_x, model_y, true_x, true_y):
     """分段归一化重映射（橡皮筋理论）"""
-    true_y = ensure_monotonic(np.array(true_y))
     true_x = np.array(true_x)
+    true_y_original = np.array(true_y, dtype=float)  # 保存原始真实值
+    true_y = ensure_monotonic(true_y_original)  # 用于插值的单调版本
     
     corrected_y = np.zeros_like(model_y, dtype=float)
     ratio_values = np.zeros_like(model_y, dtype=float)
     
-    # 首先，对所有真实测量点直接赋值，确保零误差
-    for i, (tx, ty) in enumerate(zip(true_x, true_y)):
+    # 首先，对所有真实测量点直接赋值为原始真实值，确保零误差
+    for i, (tx, ty_orig) in enumerate(zip(true_x, true_y_original)):
         exact_match = np.where(all_x == tx)[0]
         if len(exact_match) > 0:
-            corrected_y[exact_match] = ty
+            corrected_y[exact_match] = ty_orig  # 使用原始值，不是单调化后的值
             ratio_values[exact_match] = i / (len(true_x) - 1) if len(true_x) > 1 else 0
     
     for i in range(len(true_x) - 1):
@@ -383,8 +384,10 @@ def calculate_and_correct_wear():
         
         for ring in measured_rings:
             if ring in interp_wear_per_ring.index:
-                valid_measured_rings.append(ring)
-                true_radius_values.append(wear_df.loc[cid, ring])
+                true_val = float(wear_df.loc[cid, ring])
+                if not np.isnan(true_val):
+                    valid_measured_rings.append(ring)
+                    true_radius_values.append(true_val)
         
         if len(valid_measured_rings) >= 2:
             corrected_values, _ = piecewise_linear_transform(
