@@ -12,7 +12,7 @@ class CutterWearDataset(Dataset):
         刀具磨损预测数据集 - 预测所有刀具的磨损值（使用真实值修正后的数据）
         
         Args:
-            csv_path: 数据文件路径 (wear_per_timestep_corrected.csv)
+            csv_path: 数据文件路径 (wear_per_timestep_final.csv)
             sequence_length: 序列长度
             start_ring: 起始环号
             end_ring: 结束环号
@@ -64,12 +64,12 @@ class CutterWearDataset(Dataset):
 
         # 获取所有刀具的修正后磨损标签列（预测所有44把刀）
         corrected_wear_columns = sorted(
-            [col for col in df.columns if '_wear_volume_corrected' in col],
+            [col for col in df.columns if '_wear_radius_corrected' in col],
             key=lambda x: int(x.split('_')[1])
         )
         
         if len(corrected_wear_columns) == 0:
-            raise ValueError("未找到修正后的磨损列 (*_wear_volume_corrected)，请先运行 correct_wear_by_residual.py")
+            raise ValueError("未找到修正后的磨损列 (*_wear_radius_corrected)，请先运行 calculate_and_correct_wear.py")
         
         self.num_cutters = len(corrected_wear_columns)
         self.cutter_ids = [int(col.split('_')[1]) for col in corrected_wear_columns]
@@ -156,7 +156,10 @@ class CutterWearDataset(Dataset):
 
 
 if __name__ == '__main__':
-    CSV_PATH = '/media/young/4A8C40028C3FE75B/刀盘数据/disc_wear/data/processed/wear_per_timestep_corrected.csv'
+    # 使用相对路径
+    project_root = Path(__file__).resolve().parent.parent.parent
+    CSV_PATH = project_root / "data" / "processed" / "wear_per_timestep_final.csv"
+    
     SEQ_LENGTH = 100
     BATCH_SIZE = 64
     START_RING = 1
@@ -165,8 +168,9 @@ if __name__ == '__main__':
     
     try:
         print(f"Loading cutter wear data for rings {START_RING} to {END_RING}...")
-        print(f"Using corrected wear values (volume_corrected)")
+        print(f"Using corrected wear values (radius_corrected)")
         print(f"Using sliding window step size: {STEP_SIZE}")
+        print(f"Data path: {CSV_PATH}")
             
         dataset = CutterWearDataset(
             csv_path=CSV_PATH, 
